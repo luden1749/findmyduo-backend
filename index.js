@@ -1,29 +1,39 @@
-// index.js
 import express from "express";
 import cors from "cors";
 import pkg from "pg";
 import dotenv from "dotenv";
-import fetch from "node-fetch"; // si tu es en Node 18+, pas besoin d’installer
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const { Pool } = pkg;
 
-// Connexion à ta base PostgreSQL (Supabase)
+// --- CONFIG POSTGRES ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
 const app = express();
-app.use(cors());
+
+// ✅ Autoriser ton front local et le domaine en ligne
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://skillmatch.gg",
+    "https://www.skillmatch.gg"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type"],
+}));
+
 app.use(express.json());
 
-// --- ROUTES ---
+// --- ROUTES --- //
 
 // ✅ Route test
 app.get("/", (req, res) => {
-  res.send("🚀 API FindMyDuo is running!");
+  res.send("🚀 API SkillMatch is running!");
 });
 
 // ✅ Récupérer tous les utilisateurs
@@ -52,13 +62,9 @@ app.post("/users", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
-
-
-
-// 🔹 Route pour récupérer les infos d'un joueur League of Legends
-app.get("/api/lol/summoner/:name", async (req, res) => {
-  const { name } = req.params;
+// ✅ Nouvelle route Riot (avec gestion du Riot ID name#tag)
+app.get("/api/lol/summoner/:riotId", async (req, res) => {
+  const { riotId } = req.params;
   const API_KEY = process.env.RIOT_API_KEY;
 
   if (!API_KEY) {
@@ -66,39 +72,38 @@ app.get("/api/lol/summoner/:name", async (req, res) => {
   }
 
   try {
-    const url = `https://euw1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${encodeURIComponent(
-      name
-    )}`;
-    
-console.log("🔑 Clé utilisée:", API_KEY);
-console.log("🌍 URL:", `https://euw1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${encodeURIComponent(name)}`);
+    // Riot ID format: Name%23Tag (ex: luden%233760)
+    const [name, tag] = riotId.split("%23");
+
+    if (!name || !tag) {
+      return res.status(400).json({ error: "Format Riot ID invalide (ex: nom%23tag)" });
+    }
+
+    // Endpoint moderne Riot Account-V1
+    const url = `https://europe.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${name}/${tag}`;
+
+    console.log("🌍 Requête Riot API:", url);
 
     const response = await fetch(url, {
       headers: { "X-Riot-Token": API_KEY },
     });
 
-    // 404 → joueur introuvable
-    if (response.status === 404) {
-      return res.status(404).json({ error: "Joueur introuvable" });
-    }
-
-    // toute autre erreur API
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("Erreur Riot API:", text);
-      return res
-        .status(response.status)
-        .json({ error: "Erreur de la Riot API" });
-    }
-
     const data = await response.json();
+
+    if (!response.ok) {
+      console.error("❌ Erreur Riot API:", data);
+      return res.status(response.status).json({ error: "Erreur API Riot", details: data });
+    }
+
     res.json(data);
   } catch (error) {
-    console.error("Erreur de connexion Riot API:", error);
+    console.error("Erreur lors de la requête Riot:", error);
     res.status(500).json({ error: "Erreur interne serveur" });
   }
 });
 
+// --- SERVER ---
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Serveur backend lancé sur le port ${PORT}`);
 });
